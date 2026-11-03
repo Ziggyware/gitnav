@@ -5,7 +5,6 @@ pub struct Status {
     pub ahead: u32,
     pub behind: u32,
     pub changes: Vec<String>,
-<<<<<<< HEAD
     pub error: Option<String>,
     /// Loaded from cache or awaiting a re-check.
     pub stale: bool,
@@ -37,17 +36,12 @@ impl Tone {
 
 pub fn tone(s: Option<&Status>) -> Tone {
     s.map_or(Tone::Pending, Status::tone)
-=======
-    pub remote: Option<String>,
-    pub error: Option<String>,
->>>>>>> ce532fa2a485cac25364c698a4d1c4994bba308d
 }
 
 impl Status {
     pub fn dirty(&self) -> bool {
         !self.changes.is_empty()
     }
-<<<<<<< HEAD
     pub fn tone(&self) -> Tone {
         match () {
             _ if self.error.is_some() => Tone::Error,
@@ -57,14 +51,6 @@ impl Status {
             _ if self.upstream.is_none() => Tone::Unpushed,
             _ => Tone::Clean,
         }
-=======
-    /// Anything that makes local differ from (or be unknown to) the remote.
-    pub fn drift(&self) -> bool {
-        self.dirty()
-            || self.ahead + self.behind > 0
-            || self.upstream.is_none()
-            || self.error.is_some()
->>>>>>> ce532fa2a485cac25364c698a4d1c4994bba308d
     }
 }
 
@@ -113,15 +99,10 @@ mod tests {
              u UU N... 100644 100644 100644 100644 a b c conflict.rs\n\
              ? notes.txt\n",
         );
-<<<<<<< HEAD
         assert_eq!(
             (s.branch.as_str(), s.upstream.as_deref()),
             ("main", Some("origin/main"))
         );
-=======
-        assert_eq!(s.branch, "main");
-        assert_eq!(s.upstream.as_deref(), Some("origin/main"));
->>>>>>> ce532fa2a485cac25364c698a4d1c4994bba308d
         assert_eq!((s.ahead, s.behind), (2, 1));
         assert_eq!(
             s.changes,
@@ -132,10 +113,6 @@ mod tests {
                 "?? notes.txt"
             ]
         );
-<<<<<<< HEAD
         assert_eq!(s.tone(), Tone::Behind);
-=======
-        assert!(s.drift());
->>>>>>> ce532fa2a485cac25364c698a4d1c4994bba308d
     }
 }
