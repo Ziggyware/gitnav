@@ -1,5 +1,6 @@
 use crate::{
-    history::{DAYS, Info, Pulse, now, parse_numstat, parse_pulse},
+    history::{DAYS, Info, Pulse, now},
+    log_parse::{parse_numstat, parse_pulse},
     porcelain::{Status, parse},
 };
 use std::{
@@ -64,7 +65,8 @@ pub fn info(dir: &Path, paths: &[String]) -> Info {
 /// Windowed history; one extra call only when the window is empty, to date the last commit.
 pub fn pulse(dir: &Path) -> Pulse {
     let since = format!("--since={DAYS}.days");
-    let args = ["log", "--format=%ct %ad", "--date=format-local:%z", since.as_str()];
+    let fmt = "--format=@%ct %ad%x1f%an%x1f%s";
+    let args = ["log", fmt, "--numstat", "--date=format-local:%z", since.as_str()];
     let mut p = parse_pulse(&git(dir, &args).unwrap_or_default(), now());
     if p.last == 0 {
         p.last = git(dir, &["log", "-1", "--format=%ct"])

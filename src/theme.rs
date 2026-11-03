@@ -1,5 +1,5 @@
 //! Palette and glyph primitives: tones are the only semantic colours.
-use crate::{history::WEEKS, porcelain::Tone};
+use crate::porcelain::Tone;
 use ratatui::{
     style::{Color, Style, Stylize},
     text::Span,
@@ -40,21 +40,6 @@ pub fn lerp(a: Color, b: Color, t: f32) -> Color {
     };
     let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t.clamp(0.0, 1.0)) as u8;
     Color::Rgb(m(r1, r2), m(g1, g2), m(b1, b2))
-}
-
-/// Log-scaled against `max` so one hyperactive repo doesn't flatten everyone else.
-pub fn spark(weeks: &[u32; WEEKS], max: u32) -> Vec<Span<'static>> {
-    const BARS: [&str; 9] = [" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
-    let scale = (max as f32 + 1.0).ln();
-    let fade = |i: usize| lerp(DIM, ACCENT, i as f32 / (WEEKS - 1) as f32);
-    weeks
-        .iter()
-        .enumerate()
-        .map(|(i, &w)| match w {
-            0 => "▁".fg(COLD),
-            _ => BARS[(1.0 + 7.0 * (w as f32 + 1.0).ln() / scale).round() as usize].fg(fade(i)),
-        })
-        .collect()
 }
 
 pub fn age(now: i64, t: i64) -> String {

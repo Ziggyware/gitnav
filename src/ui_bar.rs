@@ -1,6 +1,7 @@
 use crate::{
-    app::{App, Sort},
+    app::App,
     events::Batch,
+    nav::Sort,
     porcelain::Tone,
     risk::Risk,
     theme::{self, *},

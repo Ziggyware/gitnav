@@ -99,6 +99,7 @@ impl App {
         v.extend(self.change_lines(s, info, w));
         if let Some(p) = self.pulses.get(&e.rel) {
             v.extend(self.activity(p, w));
+            v.extend(self.people(p, w));
         }
         v
     }

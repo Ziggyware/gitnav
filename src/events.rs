@@ -23,7 +23,10 @@ impl App {
                 self.seen.insert(rel);
             }
             Msg::Status(rel, s) => _ = self.repos.insert(rel, Some(s)),
-            Msg::Pulse(rel, p) => _ = self.pulses.insert(rel, p),
+            Msg::Pulse(rel, p) => {
+                self.pulses.insert(rel, p);
+                self.rerank();
+            }
             Msg::Info(rel, i) => _ = self.infos.insert(rel, Some(i)),
             Msg::Acted(rel, r) => {
                 self.busy.remove(&rel);

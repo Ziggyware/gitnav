@@ -1,4 +1,4 @@
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Status {
     pub branch: String,
     pub upstream: Option<String>,
@@ -7,6 +7,7 @@ pub struct Status {
     pub changes: Vec<String>,
     pub error: Option<String>,
     /// Loaded from cache or awaiting a re-check.
+    #[serde(skip)]
     pub stale: bool,
 }
 

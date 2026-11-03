@@ -1,6 +1,14 @@
 use crate::app::App;
 use std::path::{Path, PathBuf};
 
+#[derive(Clone, Copy, Default, PartialEq)]
+pub enum Sort {
+    #[default]
+    Name,
+    Attention,
+    Recent,
+}
+
 impl App {
     pub fn step(&mut self, d: isize) {
         let n = self.entries().len() as isize;

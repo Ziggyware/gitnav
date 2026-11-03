@@ -3,7 +3,7 @@ use crate::{
     porcelain::{Status, Tone},
     stats,
     theme::{self, *},
-    ui_list::badges,
+    ui_row::badges,
 };
 use ratatui::prelude::*;
 use std::path::{Path, PathBuf};
@@ -36,6 +36,7 @@ impl App {
             v.push(Line::from(vec![format!("{:<8}", "focus").fg(ACCENT), line.fg(TEXT)]));
         }
         v.extend(self.activity(&e.pulse, w));
+        v.extend(self.people(&e.pulse, w));
 
         let mut hits: Vec<(&PathBuf, &Status)> = self
             .under(&e.rel)

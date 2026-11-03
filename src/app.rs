@@ -2,6 +2,7 @@ use crate::{
     cache::{self, Pulses, Repos},
     fuzzy::fuzzy,
     history::{Info, Pulse},
+    nav::Sort,
     porcelain::{Tone, tone},
     scan::Op,
 };
@@ -45,18 +46,10 @@ impl Entry {
     }
 }
 
-#[derive(Clone, Copy, Default, PartialEq)]
-pub enum Sort {
-    #[default]
-    Name,
-    Attention,
-    Recent,
-}
-
 #[derive(Default)]
 pub struct App {
     pub root: PathBuf,
-    /// Relative repo path -> status (None = never checked). Path order keeps subtrees contiguous.
+    /// Repo path -> status (None = unchecked). Path order keeps subtrees contiguous.
     pub repos: Repos,
     pub pulses: Pulses,
     /// Lazy per-repo detail; None = requested.
@@ -76,6 +69,8 @@ pub struct App {
     pub batch: Option<crate::events::Batch>,
     pub help: bool,
     pub chat: crate::chat::Chat,
+    /// Author -> rank by commits across every repo; keys identity colours.
+    pub ranks: HashMap<String, usize>,
     pub tick: u64,
     pub now: i64,
 }
@@ -87,14 +82,16 @@ impl App {
             cfg: Some(crate::ai::Config::from_env()),
             ..Default::default()
         };
-        Self {
+        let mut app = Self {
             repos,
             pulses,
             root,
             scanning: true,
             chat,
             ..Default::default()
-        }
+        };
+        app.rerank();
+        app
     }
 
     pub fn under<'a>(&'a self, dir: &'a Path) -> impl Iterator<Item = &'a PathBuf> {
@@ -108,7 +105,8 @@ impl App {
         e.total += 1;
         e.tones[tone(self.repos.get(rel).and_then(Option::as_ref)) as usize] += 1;
         if let Some(p) = self.pulses.get(rel) {
-            e.pulse.add(p);
+            e.pulse
+                .add(p, &rel.strip_prefix(&e.rel).unwrap_or(rel).to_string_lossy());
         }
     }
 

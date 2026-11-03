@@ -1,5 +1,6 @@
 use crate::{
-    app::{App, Sort},
+    app::App,
+    nav::Sort,
     scan::{Msg, Op},
 };
 use ratatui::crossterm::event::{KeyCode::*, KeyEvent, KeyModifiers};

@@ -1,15 +1,63 @@
 use crate::{
     app::{App, Entry},
     history::WEEKS,
-    porcelain::{Status, Tone},
-    theme::{self, *},
+    theme::*,
 };
 use ratatui::{layout::Constraint::*, prelude::*, widgets::*};
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum Col {
+    Lead,
+    Name,
+    Act,
+    Pace,
+    Trend,
+    Lines,
+    People,
+    Last,
+    State,
+}
+
+/// (column, header, width); 0 = flexible. Order is display order.
+const COLS: [(Col, &str, u16); 9] = [
+    (Col::Lead, "", 2),
+    (Col::Name, "repo", 0),
+    (Col::Act, "activity · 16w", WEEKS as u16),
+    (Col::Pace, "/wk", 4),
+    (Col::Trend, "trend", 5),
+    (Col::Lines, "lines", 5),
+    (Col::People, "ppl", 3),
+    (Col::Last, "last", 4),
+    (Col::State, "state", 12),
+];
+/// Dropped first to last when the pane is too narrow; names keep at least 12 cells.
+const DROP: [Col; 5] = [Col::People, Col::Lines, Col::Trend, Col::Pace, Col::Act];
+
+fn visible(width: u16) -> Vec<(Col, &'static str, u16)> {
+    let mut cols = COLS.to_vec();
+    let need = |c: &[(Col, &str, u16)]| c.iter().map(|x| x.2 + 1).sum::<u16>() + 12;
+    for d in DROP {
+        if need(&cols) <= width {
+            break;
+        }
+        cols.retain(|c| c.0 != d);
+    }
+    cols
+}
+
 impl App {
     pub(crate) fn list(&mut self, f: &mut Frame, area: Rect, entries: &[Entry]) {
+        // Leftover height becomes a cross-repo commit feed instead of blank rows.
+        let need = entries.len() as u16 + 3;
+        let (area, feed) = if area.height >= need + 8 {
+            let [a, b] = Layout::vertical([Length(need), Fill(1)]).areas(area);
+            (a, Some(b))
+        } else {
+            (area, None)
+        };
+        let cols = visible(area.width.saturating_sub(2));
         let max = entries.iter().flat_map(|e| e.pulse.weeks()).max().unwrap_or(1).max(1);
-        let rows: Vec<Row> = entries.iter().map(|e| self.row(e, max)).collect();
+        let rows: Vec<Row> = entries.iter().map(|e| self.row(e, max, &cols)).collect();
         let what = if self.search.is_some() {
             "matches"
         } else {
@@ -19,85 +67,33 @@ impl App {
             format!(" {} ", entries.len()).fg(ACCENT).bold(),
             format!("· {what} ").fg(DIM),
         ]);
+        let legend = Line::from(vec![
+            " bars: height commits · ".fg(DIM),
+            "R".fg(Color::Rgb(255, 70, 70)).bold(),
+            " lines/commit ".fg(DIM),
+            "G".fg(Color::Rgb(70, 255, 70)).bold(),
+            " others ".fg(DIM),
+            "B".fg(Color::Rgb(90, 140, 255)).bold(),
+            " off-hours ".fg(DIM),
+        ]);
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
             .border_style(Style::new().fg(COLD))
-            .title(title);
-        // Narrow panes drop the pulse column before squeezing names.
-        let pulse = if area.width >= 64 { WEEKS as u16 } else { 0 };
-        let widths = [Length(2), Fill(1), Length(pulse), Length(4), Length(13)];
+            .title(title)
+            .title_bottom(legend);
+        let header = Row::new(cols.iter().map(|c| Cell::from(c.1.fg(DIM))));
+        let widths: Vec<Constraint> = cols
+            .iter()
+            .map(|c| if c.2 == 0 { Fill(1) } else { Length(c.2) })
+            .collect();
         let table = Table::new(rows, widths)
+            .header(header)
             .block(block)
             .row_highlight_style(Style::new().bg(SEL));
         f.render_stateful_widget(table, area, &mut self.table);
+        let sel = self.table.selected().and_then(|i| entries.get(i));
+        if let (Some(feed), Some(e)) = (feed, sel) {
+            self.feed(f, feed, e);
+        }
     }
-
-    fn row(&self, e: &Entry, max: u32) -> Row<'static> {
-        let st = self.repos.get(&e.rel).and_then(Option::as_ref);
-        let marked = self
-            .marks
-            .range(e.rel.clone()..)
-            .next()
-            .is_some_and(|m| m.starts_with(&e.rel));
-        let busy = self.busy.iter().any(|b| b.starts_with(&e.rel));
-        let pending = e.tones[Tone::Pending as usize] > 0;
-        let icon = match () {
-            _ if busy || pending => spin(self.tick),
-            _ if e.repo => "•".into(),
-            _ => "›".into(),
-        };
-        let lead = Line::from(vec![
-            if marked { "▌".fg(ACCENT) } else { " ".into() },
-            icon.fg(theme::tone(e.worst())),
-        ]);
-        let stale = st.is_some_and(|s| s.stale);
-        let name = match (e.repo, stale) {
-            (false, _) => format!("{}/", e.name).fg(TEXT).bold(),
-            (true, false) => e.name.clone().fg(TEXT),
-            (true, true) => e.name.clone().fg(DIM),
-        };
-        let age = theme::age(self.now, e.pulse.last).fg(heat(self.now, e.pulse.last));
-        let tail = if e.repo {
-            st.map_or_else(Vec::new, badges)
-        } else {
-            let mut v = bar(&e.tones, 8);
-            v.push(format!(" {:>3}", e.total).fg(DIM));
-            v
-        };
-        let cells = [
-            lead,
-            name.into(),
-            Line::from(spark(&e.pulse.weeks(), max)),
-            age.into(),
-            Line::from(tail),
-        ];
-        Row::new(cells.map(Cell::from))
-    }
-}
-
-pub fn badges(s: &Status) -> Vec<Span<'static>> {
-    let t = |x| theme::tone(x);
-    let mut v = Vec::new();
-    if s.error.is_some() {
-        v.push(" ×".fg(t(Tone::Error)));
-    }
-    if s.dirty() {
-        v.push(format!(" ±{}", s.changes.len()).fg(t(Tone::Dirty)));
-    }
-    if s.ahead > 0 {
-        v.push(format!(" ↑{}", s.ahead).fg(t(Tone::Ahead)));
-    }
-    if s.behind > 0 {
-        v.push(format!(" ↓{}", s.behind).fg(t(Tone::Behind)));
-    }
-    if s.upstream.is_none() {
-        v.push(" ⌂".fg(t(Tone::Unpushed)));
-    }
-    if v.is_empty() {
-        v.push(" =".fg(t(Tone::Clean)));
-    }
-    if s.stale {
-        v = v.into_iter().map(Stylize::dim).collect();
-    }
-    v
 }
