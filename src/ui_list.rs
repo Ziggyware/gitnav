@@ -8,12 +8,7 @@ use ratatui::{layout::Constraint::*, prelude::*, widgets::*};
 
 impl App {
     pub(crate) fn list(&mut self, f: &mut Frame, area: Rect, entries: &[Entry]) {
-        let max = entries
-            .iter()
-            .flat_map(|e| e.weeks)
-            .max()
-            .unwrap_or(1)
-            .max(1);
+        let max = entries.iter().flat_map(|e| e.pulse.weeks()).max().unwrap_or(1).max(1);
         let rows: Vec<Row> = entries.iter().map(|e| self.row(e, max)).collect();
         let what = if self.search.is_some() {
             "matches"
@@ -48,8 +43,8 @@ impl App {
         let pending = e.tones[Tone::Pending as usize] > 0;
         let icon = match () {
             _ if busy || pending => spin(self.tick),
-            _ if e.repo => "●".into(),
-            _ => "▸".into(),
+            _ if e.repo => "•".into(),
+            _ => "›".into(),
         };
         let lead = Line::from(vec![
             if marked { "▌".fg(ACCENT) } else { " ".into() },
@@ -61,7 +56,7 @@ impl App {
             (true, false) => e.name.clone().fg(TEXT),
             (true, true) => e.name.clone().fg(DIM),
         };
-        let age = theme::age(self.now, e.last).fg(heat(self.now, e.last));
+        let age = theme::age(self.now, e.pulse.last).fg(heat(self.now, e.pulse.last));
         let tail = if e.repo {
             st.map_or_else(Vec::new, badges)
         } else {
@@ -72,7 +67,7 @@ impl App {
         let cells = [
             lead,
             name.into(),
-            Line::from(spark(&e.weeks, max)),
+            Line::from(spark(&e.pulse.weeks(), max)),
             age.into(),
             Line::from(tail),
         ];
@@ -84,10 +79,10 @@ pub fn badges(s: &Status) -> Vec<Span<'static>> {
     let t = |x| theme::tone(x);
     let mut v = Vec::new();
     if s.error.is_some() {
-        v.push(" ✖".fg(t(Tone::Error)));
+        v.push(" ×".fg(t(Tone::Error)));
     }
     if s.dirty() {
-        v.push(format!(" ✎{}", s.changes.len()).fg(t(Tone::Dirty)));
+        v.push(format!(" ±{}", s.changes.len()).fg(t(Tone::Dirty)));
     }
     if s.ahead > 0 {
         v.push(format!(" ↑{}", s.ahead).fg(t(Tone::Ahead)));
@@ -96,10 +91,10 @@ pub fn badges(s: &Status) -> Vec<Span<'static>> {
         v.push(format!(" ↓{}", s.behind).fg(t(Tone::Behind)));
     }
     if s.upstream.is_none() {
-        v.push(" ◌".fg(t(Tone::Unpushed)));
+        v.push(" ⌂".fg(t(Tone::Unpushed)));
     }
     if v.is_empty() {
-        v.push(" ✓".fg(t(Tone::Clean)));
+        v.push(" =".fg(t(Tone::Clean)));
     }
     if s.stale {
         v = v.into_iter().map(Stylize::dim).collect();

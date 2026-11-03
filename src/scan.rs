@@ -1,6 +1,6 @@
 use crate::{
     git::{git, status},
-    history::{Info, Pulse, now, parse_pulse},
+    history::{Info, Pulse},
     porcelain::Status,
 };
 use std::{
@@ -41,6 +41,7 @@ pub enum Msg {
     Info(PathBuf, Info),
     Acted(PathBuf, Result<(), String>),
     Walked,
+    Ai(crate::agent::Event),
 }
 
 enum Task {
@@ -116,12 +117,8 @@ fn run(root: &Path, task: Task, q: &Queue, tx: &Sender<Msg>) {
             }
         }
         Task::Pulse(rel) => {
-            let log = git(
-                &root.join(&rel),
-                &["log", "--format=%ct", "--max-count=400"],
-            )
-            .unwrap_or_default();
-            send(Msg::Pulse(rel, parse_pulse(&log, now())));
+            let p = crate::git::pulse(&root.join(&rel));
+            send(Msg::Pulse(rel, p));
         }
         Task::Walk(dir) => {
             let (repo, kids) = list(&dir);

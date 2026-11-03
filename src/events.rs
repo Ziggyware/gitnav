@@ -38,6 +38,7 @@ impl App {
                     }
                 }
             }
+            Msg::Ai(e) => self.on_ai(e),
             Msg::Walked => {
                 self.scanning = false;
                 let seen = std::mem::take(&mut self.seen);
@@ -48,15 +49,18 @@ impl App {
     }
 
     pub fn want_info(&mut self, tx: &Sender<Msg>) {
-        let Some(e) = self
-            .selected()
-            .filter(|e| e.repo && !self.infos.contains_key(&e.rel))
-        else {
+        let Some(e) = self.selected().filter(|e| e.repo && !self.infos.contains_key(&e.rel)) else {
             return;
         };
         self.infos.insert(e.rel.clone(), None);
+        // "XY path" or "XY new <- old": the file on disk is the first path.
+        let changes = self.repos[&e.rel].as_ref().map_or(&[][..], |s| &s.changes[..]);
+        let paths: Vec<String> = changes
+            .iter()
+            .filter_map(|c| c.get(3..)?.split(" <- ").next().map(Into::into))
+            .collect();
         let (dir, tx) = (self.abs(&e.rel), tx.clone());
-        thread::spawn(move || _ = tx.send(Msg::Info(e.rel, crate::git::info(&dir))));
+        thread::spawn(move || _ = tx.send(Msg::Info(e.rel, crate::git::info(&dir, &paths))));
     }
 
     /// Marked repos, else everything under the selection.
@@ -115,11 +119,7 @@ impl App {
     pub fn mark_attention(&mut self) {
         let hits: Vec<PathBuf> = self
             .under(&self.cwd)
-            .filter(|r| {
-                self.repos[*r]
-                    .as_ref()
-                    .is_some_and(|s| s.tone() < Tone::Clean)
-            })
+            .filter(|r| self.repos[*r].as_ref().is_some_and(|s| s.tone() < Tone::Clean))
             .cloned()
             .collect();
         self.marks.extend(hits);

@@ -1,8 +1,5 @@
-//! Last-known state per root, painted instantly as stale and revalidated by the scan.
-use crate::{
-    history::{Pulse, WEEKS},
-    porcelain::Status,
-};
+//! Last-known state per root: painted instantly as stale, then revalidated.
+use crate::{history::Pulse, porcelain::Status};
 use std::{
     collections::{BTreeMap, HashMap},
     env, fs,
@@ -45,10 +42,7 @@ fn encode(repos: &Repos, pulses: &Pulses) -> String {
     let mut out = String::new();
     for (p, s) in repos.iter().filter_map(|(p, s)| Some((p, s.as_ref()?))) {
         let ch: Vec<String> = s.changes.iter().map(|c| clean(c)).collect();
-        let pulse = pulses.get(p).map_or(String::new(), |u| {
-            let w: Vec<String> = u.weeks.iter().map(u32::to_string).collect();
-            format!("{}{L}{}", u.last, w.join(","))
-        });
+        let pulse = pulses.get(p).map_or(String::new(), encode_pulse);
         let (path, br, up, err) = (
             clean(&p.to_string_lossy()),
             clean(&s.branch),
@@ -61,16 +55,32 @@ fn encode(repos: &Repos, pulses: &Pulses) -> String {
     out
 }
 
+fn csv<T: ToString>(v: &[T]) -> String {
+    v.iter().map(T::to_string).collect::<Vec<_>>().join(",")
+}
+
+fn encode_pulse(u: &Pulse) -> String {
+    let b = u.burst.map_or(String::new(), |b| b.to_string());
+    let (days, hours) = (csv(&u.days), csv(&u.hours));
+    format!(
+        "{}{L}{}{L}{days}{L}{hours}{L}{}{L}{}{L}{b}",
+        u.last, u.today, u.circ.0, u.circ.1
+    )
+}
+
 fn decode_pulse(v: &str) -> Option<Pulse> {
-    let (last, weeks) = v.split_once(L)?;
-    let w: Vec<u32> = weeks
-        .split(',')
-        .map(str::parse)
-        .collect::<Result<_, _>>()
-        .ok()?;
+    let f: Vec<&str> = v.split(L).collect();
+    let &[last, today, days, hours, c, s, b] = &f[..] else {
+        return None;
+    };
+    let nums = |x: &str| x.split(',').map(str::parse).collect::<Result<Vec<u16>, _>>().ok();
     Some(Pulse {
         last: last.parse().ok()?,
-        weeks: w.try_into().ok()?,
+        today: today.parse().ok()?,
+        days: nums(days)?.try_into().ok()?,
+        hours: nums(hours)?.try_into().ok()?,
+        circ: (c.parse().ok()?, s.parse().ok()?),
+        burst: b.parse().ok(),
     })
 }
 
@@ -85,11 +95,7 @@ fn decode(t: &str) -> (Repos, Pulses) {
         let (Ok(ahead), Ok(behind)) = (ahead.parse(), behind.parse()) else {
             continue;
         };
-        let changes = ch
-            .split(L)
-            .filter(|c| !c.is_empty())
-            .map(Into::into)
-            .collect();
+        let changes = ch.split(L).filter(|c| !c.is_empty()).map(Into::into).collect();
         let (branch, upstream, error) = (branch.into(), opt(up), opt(err));
         let s = Status {
             branch,
@@ -100,7 +106,7 @@ fn decode(t: &str) -> (Repos, Pulses) {
             error,
             stale: true,
         };
-        if let Some(u) = decode_pulse(pulse).filter(|u| u.weeks.len() == WEEKS) {
+        if let Some(u) = decode_pulse(pulse) {
             pulses.insert(p.into(), u);
         }
         repos.insert(p.into(), Some(s));
@@ -122,16 +128,20 @@ mod tests {
             error: Some("bad\nthing".into()),
             ..Default::default()
         };
-        let mut weeks = [0; WEEKS];
-        weeks[3] = 7;
+        let mut u = Pulse {
+            last: 42,
+            today: 19_000,
+            circ: (1.5, -0.25),
+            burst: Some(0.5),
+            ..Default::default()
+        };
+        (u.days[3], u.hours[22]) = (7, 9);
         let repos = Repos::from([("w/api".into(), Some(s)), ("pending".into(), None)]);
-        let pulses = Pulses::from([("w/api".into(), Pulse { last: 42, weeks })]);
+        let pulses = Pulses::from([("w/api".into(), u.clone())]);
         let (back, bp) = decode(&encode(&repos, &pulses));
         let got = back[Path::new("w/api")].as_ref().unwrap();
-        assert_eq!(back.len(), 1);
-        assert!(got.stale);
-        assert_eq!((got.ahead, got.behind, got.changes.len()), (3, 0, 2));
+        assert_eq!((back.len(), got.stale, got.ahead, got.changes.len()), (1, true, 3, 2));
         assert_eq!(got.error.as_deref(), Some("bad thing"));
-        assert_eq!(bp[Path::new("w/api")], Pulse { last: 42, weeks });
+        assert_eq!(bp[Path::new("w/api")], u);
     }
 }

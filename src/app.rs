@@ -1,7 +1,7 @@
 use crate::{
     cache::{self, Pulses, Repos},
     fuzzy::fuzzy,
-    history::{Info, WEEKS},
+    history::{Info, Pulse},
     porcelain::{Tone, tone},
     scan::Op,
 };
@@ -18,8 +18,7 @@ pub struct Entry {
     pub repo: bool,
     pub total: usize,
     pub tones: [usize; 7],
-    pub weeks: [u32; WEEKS],
-    pub last: i64,
+    pub pulse: Pulse,
     score: i32,
 }
 
@@ -31,8 +30,7 @@ impl Entry {
             repo,
             total: 0,
             tones: [0; 7],
-            weeks: [0; WEEKS],
-            last: 0,
+            pulse: Pulse::default(),
             score: 0,
         }
     }
@@ -77,6 +75,7 @@ pub struct App {
     pub confirm: Option<(Op, Vec<PathBuf>)>,
     pub batch: Option<crate::events::Batch>,
     pub help: bool,
+    pub chat: crate::chat::Chat,
     pub tick: u64,
     pub now: i64,
 }
@@ -84,11 +83,16 @@ pub struct App {
 impl App {
     pub fn new(root: PathBuf) -> Self {
         let (repos, pulses) = cache::load(&root);
+        let chat = crate::chat::Chat {
+            cfg: Some(crate::ai::Config::from_env()),
+            ..Default::default()
+        };
         Self {
             repos,
             pulses,
             root,
             scanning: true,
+            chat,
             ..Default::default()
         }
     }
@@ -104,8 +108,7 @@ impl App {
         e.total += 1;
         e.tones[tone(self.repos.get(rel).and_then(Option::as_ref)) as usize] += 1;
         if let Some(p) = self.pulses.get(rel) {
-            e.weeks.iter_mut().zip(p.weeks).for_each(|(a, b)| *a += b);
-            e.last = e.last.max(p.last);
+            e.pulse.add(p);
         }
     }
 
@@ -123,11 +126,7 @@ impl App {
                 head.to_string_lossy().into_owned()
             };
             if out.last().is_none_or(|e| e.name != name) {
-                out.push(Entry::new(
-                    name,
-                    self.cwd.join(head),
-                    rest.components().count() <= 1,
-                ));
+                out.push(Entry::new(name, self.cwd.join(head), rest.components().count() <= 1));
             }
             self.add(out.last_mut().unwrap(), rel);
         }
@@ -150,10 +149,7 @@ impl App {
     }
 
     pub fn entries(&self) -> Vec<Entry> {
-        let mut out = self
-            .search
-            .as_deref()
-            .map_or_else(|| self.tree(), |q| self.matches(q));
+        let mut out = self.search.as_deref().map_or_else(|| self.tree(), |q| self.matches(q));
         if self.only_drift {
             out.retain(|e| e.attention() + e.tones[Tone::Pending as usize] > 0);
         }
@@ -161,7 +157,7 @@ impl App {
         match (&self.search, self.sort) {
             (Some(_), _) => out.sort_by_key(|e| Reverse(e.score)),
             (_, Sort::Attention) => out.sort_by_key(|e| (e.worst(), Reverse(e.attention()))),
-            (_, Sort::Recent) => out.sort_by_key(|e| Reverse(e.last)),
+            (_, Sort::Recent) => out.sort_by_key(|e| Reverse(e.pulse.last)),
             (_, Sort::Name) => {}
         }
         out

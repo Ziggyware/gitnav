@@ -24,8 +24,7 @@ impl App {
             .collect();
         let tw = tile(px.len(), w);
         let chunk = px.len().div_ceil(w * h * 2).max(1);
-        let shade =
-            |&(t, focus): &(Tone, u8)| lerp(theme::tone(t), BG, [0.82, 0.5, 0.0][focus as usize]);
+        let shade = |&(t, focus): &(Tone, u8)| lerp(theme::tone(t), BG, [0.82, 0.5, 0.0][focus as usize]);
         let cells: Vec<Option<Color>> = if tw > 1 {
             // Few repos: wide tiles with a one-cell gutter.
             px.iter()

@@ -15,6 +15,26 @@ impl App {
         if k.code == Char('c') && k.modifiers.contains(KeyModifiers::CONTROL) {
             return Some(Exit::Quit);
         }
+        // An agent thread is blocked on this answer: nothing else may consume the key.
+        if let Some((_, _, answer)) = self.chat.confirm.take() {
+            let _ = answer.send(k.code == Char('y'));
+            return None;
+        }
+        if self.chat.open && self.chat.focus {
+            let c = &mut self.chat;
+            match k.code {
+                Esc if c.key_entry => (c.key_entry, c.input) = (false, String::new()),
+                Esc => (c.open, c.focus) = (false, false),
+                Enter => self.ask(tx),
+                Backspace => _ = c.input.pop(),
+                Up | PageUp => c.scroll += if k.code == Up { 1 } else { 10 },
+                Down | PageDown => c.scroll = c.scroll.saturating_sub(if k.code == Down { 1 } else { 10 }),
+                Tab => c.focus = false,
+                Char(ch) => c.input.push(ch),
+                _ => {}
+            }
+            return None;
+        }
         if std::mem::take(&mut self.help) {
             return None;
         }
@@ -83,6 +103,7 @@ impl App {
                 self.table.select(Some(0));
             }
             Char('?') => self.help = true,
+            Char('i') | Tab => self.open_chat(),
             _ => {}
         }
         None

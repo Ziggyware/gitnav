@@ -1,10 +1,12 @@
 use crate::{
-    history::{Info, parse_numstat},
+    history::{DAYS, Info, Pulse, now, parse_numstat, parse_pulse},
     porcelain::{Status, parse},
 };
 use std::{
+    fs,
     path::Path,
     process::{Command, Stdio},
+    time::UNIX_EPOCH,
 };
 
 pub fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
@@ -36,16 +38,39 @@ pub fn status(dir: &Path) -> Status {
         })
 }
 
-pub fn info(dir: &Path) -> Info {
+/// `paths`: the repo's uncommitted files, whose mtimes say how long work has sat uncommitted.
+pub fn info(dir: &Path, paths: &[String]) -> Info {
     let head = git(dir, &["log", "-1", "--format=%s%x1f%an%x1f%ct"]).unwrap_or_default();
     let mut h = head.trim_end().splitn(3, '\x1f');
+    let mtime = |p: &String| {
+        let m = fs::metadata(dir.join(p)).and_then(|m| m.modified()).ok()?;
+        Some(m.duration_since(UNIX_EPOCH).ok()?.as_secs() as i64)
+    };
+    let times: Vec<i64> = paths.iter().filter_map(mtime).collect();
+    let edits = (
+        times.iter().copied().min().unwrap_or(0),
+        times.iter().copied().max().unwrap_or(0),
+    );
     Info {
-        remote: git(dir, &["remote", "get-url", "origin"])
-            .map_or("no remote".into(), |r| r.trim().into()),
+        remote: git(dir, &["remote", "get-url", "origin"]).map_or("no remote".into(), |r| r.trim().into()),
         subject: h.next().unwrap_or("").into(),
         author: h.next().unwrap_or("").into(),
         when: h.next().and_then(|t| t.parse().ok()).unwrap_or(0),
-        stat: git(dir, &["diff", "HEAD", "--numstat"])
-            .map_or_else(|_| Vec::new(), |o| parse_numstat(&o)),
+        stat: git(dir, &["diff", "HEAD", "--numstat"]).map_or_else(|_| Vec::new(), |o| parse_numstat(&o)),
+        edits,
     }
+}
+
+/// Windowed history; one extra call only when the window is empty, to date the last commit.
+pub fn pulse(dir: &Path) -> Pulse {
+    let since = format!("--since={DAYS}.days");
+    let args = ["log", "--format=%ct %ad", "--date=format-local:%z", since.as_str()];
+    let mut p = parse_pulse(&git(dir, &args).unwrap_or_default(), now());
+    if p.last == 0 {
+        p.last = git(dir, &["log", "-1", "--format=%ct"])
+            .ok()
+            .and_then(|t| t.trim().parse().ok())
+            .unwrap_or(0);
+    }
+    p
 }

@@ -1,20 +1,34 @@
+mod agent;
+mod ai;
 mod app;
 mod cache;
+mod chat;
 mod events;
+mod exec;
 mod fuzzy;
 mod git;
 mod history;
 mod keys;
 mod nav;
 mod porcelain;
+mod prompt;
+mod risk;
 mod scan;
+mod stats;
 mod theme;
+mod tools;
 mod ui;
+mod ui_activity;
 mod ui_bar;
+mod ui_changes;
+mod ui_chat;
 mod ui_detail;
 mod ui_folder;
+mod ui_heat;
+mod ui_help;
 mod ui_list;
 mod ui_mosaic;
+mod wrap;
 
 use app::App;
 use keys::Exit;
@@ -38,11 +52,7 @@ use std::{
 type Term = Terminal<CrosstermBackend<Stderr>>;
 
 fn main() -> io::Result<()> {
-    let root = std::path::absolute(
-        std::env::args()
-            .nth(1)
-            .map_or(std::env::current_dir()?, PathBuf::from),
-    )?;
+    let root = std::path::absolute(std::env::args().nth(1).map_or(std::env::current_dir()?, PathBuf::from))?;
     if !root.is_dir() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
@@ -61,8 +71,7 @@ fn main() -> io::Result<()> {
         hook(p)
     }));
     let mut app = App::new(root);
-    let res = Terminal::new(CrosstermBackend::new(io::stderr()))
-        .and_then(|mut t| run(&mut t, &mut app, rx, tx));
+    let res = Terminal::new(CrosstermBackend::new(io::stderr())).and_then(|mut t| run(&mut t, &mut app, rx, tx));
     restore();
     cache::save(&app.root, &app.repos, &app.pulses);
     if let Some(p) = res? {
@@ -78,12 +87,7 @@ fn restore() {
 
 const FRAME: Duration = Duration::from_millis(80);
 
-fn run(
-    t: &mut Term,
-    app: &mut App,
-    rx: Receiver<Msg>,
-    tx: Sender<Msg>,
-) -> io::Result<Option<PathBuf>> {
+fn run(t: &mut Term, app: &mut App, rx: Receiver<Msg>, tx: Sender<Msg>) -> io::Result<Option<PathBuf>> {
     // Draw on change, plus spinner frames only while work is in flight.
     let (mut redraw, mut last) = (true, Instant::now());
     loop {
@@ -92,7 +96,7 @@ fn run(
             redraw = true;
         }
         let animating =
-            app.scanning || !app.busy.is_empty() || app.repos.values().any(Option::is_none);
+            app.scanning || app.chat.busy || !app.busy.is_empty() || app.repos.values().any(Option::is_none);
         if animating && last.elapsed() >= FRAME {
             app.tick += 1;
             redraw = true;

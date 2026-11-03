@@ -26,11 +26,12 @@ pub fn tone(t: Tone) -> Color {
 }
 
 pub fn glyph(t: Tone) -> &'static str {
-    ["✖", "↓", "✎", "↑", "◌", "✓", "…"][t as usize]
+    // Native to common monospace faces and centred on the digit line: no fallback-font drift.
+    ["×", "↓", "±", "↑", "⌂", "=", "·"][t as usize]
 }
 
 pub fn spin(tick: u64) -> String {
-    ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'][tick as usize % 10].to_string()
+    ["|", "/", "-", "\\"][tick as usize % 4].to_string()
 }
 
 pub fn lerp(a: Color, b: Color, t: f32) -> Color {
@@ -82,13 +83,7 @@ pub fn bar(counts: &[usize; 7], width: usize) -> Vec<Span<'static>> {
     }
     let mut cells: Vec<usize> = counts
         .iter()
-        .map(|&c| {
-            if c == 0 {
-                0
-            } else {
-                (c * width / total).max(1)
-            }
-        })
+        .map(|&c| if c == 0 { 0 } else { (c * width / total).max(1) })
         .collect();
     let biggest = |v: &[usize]| (0..7).max_by_key(|&i| v[i]).unwrap();
     while cells.iter().sum::<usize>() > width {
