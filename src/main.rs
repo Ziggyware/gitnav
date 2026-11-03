@@ -1,15 +1,27 @@
 mod app;
 mod cache;
 mod events;
+mod fuzzy;
+mod git;
+mod history;
+mod keys;
+mod nav;
 mod porcelain;
 mod scan;
+mod theme;
 mod ui;
+mod ui_bar;
+mod ui_detail;
+mod ui_folder;
+mod ui_list;
+mod ui_mosaic;
 
 use app::App;
+use keys::Exit;
 use ratatui::{
     Terminal,
     crossterm::{
-        event::{self, Event, KeyCode::*, KeyEventKind, KeyModifiers},
+        event::{self, Event, KeyEventKind},
         execute,
         terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
     },
@@ -20,7 +32,7 @@ use std::{
     io::{self, Stderr},
     path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 type Term = Terminal<CrosstermBackend<Stderr>>;
@@ -52,7 +64,7 @@ fn main() -> io::Result<()> {
     let res = Terminal::new(CrosstermBackend::new(io::stderr()))
         .and_then(|mut t| run(&mut t, &mut app, rx, tx));
     restore();
-    cache::save(&app.root, &app.repos);
+    cache::save(&app.root, &app.repos, &app.pulses);
     if let Some(p) = res? {
         println!("{}", p.display());
     }
@@ -64,23 +76,31 @@ fn restore() {
     let _ = execute!(io::stderr(), LeaveAlternateScreen);
 }
 
+const FRAME: Duration = Duration::from_millis(80);
+
 fn run(
     t: &mut Term,
     app: &mut App,
     rx: Receiver<Msg>,
     tx: Sender<Msg>,
 ) -> io::Result<Option<PathBuf>> {
-    // Draw only on change; ratatui diffs cells, but skipping the frame skips layout too.
-    let mut redraw = true;
+    // Draw on change, plus spinner frames only while work is in flight.
+    let (mut redraw, mut last) = (true, Instant::now());
     loop {
         for m in rx.try_iter() {
             app.apply(m);
             redraw = true;
         }
+        let animating =
+            app.scanning || !app.busy.is_empty() || app.repos.values().any(Option::is_none);
+        if animating && last.elapsed() >= FRAME {
+            app.tick += 1;
+            redraw = true;
+        }
         if redraw {
-            app.want_remote(&tx);
+            app.want_info(&tx);
             t.draw(|f| app.draw(f))?;
-            redraw = false;
+            (redraw, last) = (false, Instant::now());
         }
         if !event::poll(Duration::from_millis(30))? {
             continue;
@@ -92,24 +112,10 @@ fn run(
         if k.kind != KeyEventKind::Press {
             continue;
         }
-        match k.code {
-            Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => return Ok(None),
-            Char('q') | Esc => return Ok(None),
-            Char('j') | Down => app.step(1),
-            Char('k') | Up => app.step(-1),
-            PageDown => app.step(10),
-            PageUp => app.step(-10),
-            Enter | Right | Char('l') => {
-                if let Some(p) = app.enter() {
-                    return Ok(Some(p));
-                }
-            }
-            Backspace | Left | Char('h') => app.up(),
-            Char('c') => return Ok(app.selected().map(|e| app.abs(&e.rel))),
-            Char('f') => app.refresh(true, &tx),
-            Char('r') => app.refresh(false, &tx),
-            Char('d') => app.only_drift ^= true,
-            _ => {}
+        match app.key(k, &tx) {
+            Some(Exit::Quit) => return Ok(None),
+            Some(Exit::Cd(p)) => return Ok(Some(p)),
+            None => {}
         }
     }
 }

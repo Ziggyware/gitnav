@@ -6,20 +6,51 @@ pub struct Status {
     pub behind: u32,
     pub changes: Vec<String>,
     pub error: Option<String>,
-    /// Loaded from cache, not yet revalidated.
+    /// Loaded from cache or awaiting a re-check.
     pub stale: bool,
+}
+
+/// One-colour summary of a repo; declaration order is precedence (worst first).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Tone {
+    Error,
+    Behind,
+    Dirty,
+    Ahead,
+    Unpushed,
+    Clean,
+    Pending,
+}
+
+impl Tone {
+    pub const ALL: [Tone; 7] = [
+        Tone::Error,
+        Tone::Behind,
+        Tone::Dirty,
+        Tone::Ahead,
+        Tone::Unpushed,
+        Tone::Clean,
+        Tone::Pending,
+    ];
+}
+
+pub fn tone(s: Option<&Status>) -> Tone {
+    s.map_or(Tone::Pending, Status::tone)
 }
 
 impl Status {
     pub fn dirty(&self) -> bool {
         !self.changes.is_empty()
     }
-    /// Anything that makes local differ from (or be unknown to) the remote.
-    pub fn drift(&self) -> bool {
-        self.dirty()
-            || self.ahead + self.behind > 0
-            || self.upstream.is_none()
-            || self.error.is_some()
+    pub fn tone(&self) -> Tone {
+        match () {
+            _ if self.error.is_some() => Tone::Error,
+            _ if self.behind > 0 => Tone::Behind,
+            _ if self.dirty() => Tone::Dirty,
+            _ if self.ahead > 0 => Tone::Ahead,
+            _ if self.upstream.is_none() => Tone::Unpushed,
+            _ => Tone::Clean,
+        }
     }
 }
 
@@ -68,8 +99,10 @@ mod tests {
              u UU N... 100644 100644 100644 100644 a b c conflict.rs\n\
              ? notes.txt\n",
         );
-        assert_eq!(s.branch, "main");
-        assert_eq!(s.upstream.as_deref(), Some("origin/main"));
+        assert_eq!(
+            (s.branch.as_str(), s.upstream.as_deref()),
+            ("main", Some("origin/main"))
+        );
         assert_eq!((s.ahead, s.behind), (2, 1));
         assert_eq!(
             s.changes,
@@ -80,6 +113,6 @@ mod tests {
                 "?? notes.txt"
             ]
         );
-        assert!(s.drift());
+        assert_eq!(s.tone(), Tone::Behind);
     }
 }
