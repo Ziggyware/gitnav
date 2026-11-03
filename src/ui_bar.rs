@@ -40,17 +40,17 @@ impl App {
         }
         let keys = [
             ("enter", "open"),
-            ("←", "up"),
-            ("space", "mark"),
-            ("f", "fetch"),
-            ("p", "pull"),
-            ("P", "push"),
+            ("b", "branches"),
+            ("c", "commit"),
+            ("G", "publish"),
+            ("N", "new"),
+            ("p/P", "pull/push"),
         ];
         let more = [
+            ("u", "unuploaded"),
+            ("d", "drift"),
             ("i", "ask AI"),
             ("/", "find"),
-            ("s", "sort"),
-            ("d", "drift"),
             ("?", "help"),
             ("q", "quit"),
         ];

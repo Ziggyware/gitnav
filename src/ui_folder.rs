@@ -13,14 +13,21 @@ impl App {
         let legend = Tone::ALL.iter().filter(|&&t| e.tones[t as usize] > 0);
         let legend = legend.map(|&t| format!("{}{}  ", glyph(t), e.tones[t as usize]).fg(theme::tone(t)));
         let clean = 100 * e.tones[Tone::Clean as usize] / e.total.max(1);
+        let unuploaded = e.unuploaded();
         let mut v = vec![
             Line::from(bar(&e.tones, w as usize)),
             Line::from(
                 legend
-                    .chain([format!("· {} repos", e.total).fg(DIM)])
+                    .chain([format!("· {} projects", e.total).fg(DIM)])
                     .collect::<Vec<_>>(),
             ),
-            Line::from(format!("{clean}% clean · {} need attention", e.attention()).fg(TEXT)),
+            Line::from(
+                format!(
+                    "{clean}% clean · {} need attention · {unuploaded} never uploaded to GitHub",
+                    e.attention()
+                )
+                .fg(TEXT),
+            ),
         ];
         let rel = |p: &Path| p.strip_prefix(&e.rel).unwrap_or(p).display().to_string();
         let mut by: Vec<(u32, &PathBuf)> = self
@@ -35,6 +42,42 @@ impl App {
             let line = format!("80% of commits in {k} of {} repos: {}{more}", e.total, names.join(", "));
             v.push(Line::from(vec![format!("{:<8}", "focus").fg(ACCENT), line.fg(TEXT)]));
         }
+
+        let unup_list: Vec<(&PathBuf, &Status)> = self
+            .under(&e.rel)
+            .filter_map(|r| {
+                self.repos[r]
+                    .as_ref()
+                    .filter(|s| s.never_uploaded())
+                    .map(|s| (r, s))
+            })
+            .collect();
+        if !unup_list.is_empty() {
+            v.push(Line::default());
+            v.push(Line::from(
+                format!(
+                    "potential apps never uploaded to GitHub · {} (press u to filter, G to publish)",
+                    unup_list.len()
+                )
+                .fg(theme::tone(Tone::Unborn))
+                .bold(),
+            ));
+            for (r, s) in unup_list.iter().take(8) {
+                let kind = if s.unborn {
+                    "◊ unborn folder"
+                } else if !s.has_remote {
+                    "⌂ no remote"
+                } else {
+                    "⌂ unpushed branch"
+                };
+                v.push(Line::from(vec![
+                    format!("  {kind:<17} ").fg(theme::tone(s.tone())),
+                    rel(r).fg(TEXT).bold(),
+                    format!(" ({} files)", s.changes.len()).fg(DIM),
+                ]));
+            }
+        }
+
         v.extend(self.activity(&e.pulse, w));
         v.extend(self.people(&e.pulse, w));
 

@@ -3,7 +3,7 @@ use crate::{
     fuzzy::fuzzy,
     history::{Info, Pulse},
     nav::Sort,
-    porcelain::{Tone, tone},
+    porcelain::{BranchRef, Tone, tone},
     scan::Op,
 };
 use ratatui::widgets::TableState;
@@ -13,12 +13,34 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[derive(Clone, Debug)]
+pub enum Modal {
+    Commit {
+        targets: Vec<PathBuf>,
+        msg: String,
+    },
+    Adopt {
+        targets: Vec<PathBuf>,
+        spec: String,
+    },
+    Branches {
+        rel: PathBuf,
+        items: Vec<BranchRef>,
+        sel: usize,
+        creating: Option<String>,
+    },
+    NewProject {
+        cwd: PathBuf,
+        spec: String,
+    },
+}
+
 pub struct Entry {
     pub name: String,
     pub rel: PathBuf,
     pub repo: bool,
     pub total: usize,
-    pub tones: [usize; 7],
+    pub tones: [usize; 8],
     pub pulse: Pulse,
     score: i32,
 }
@@ -30,13 +52,16 @@ impl Entry {
             rel,
             repo,
             total: 0,
-            tones: [0; 7],
+            tones: [0; 8],
             pulse: Pulse::default(),
             score: 0,
         }
     }
     pub fn attention(&self) -> usize {
         self.total - self.tones[Tone::Clean as usize] - self.tones[Tone::Pending as usize]
+    }
+    pub fn unuploaded(&self) -> usize {
+        self.tones[Tone::Unborn as usize] + self.tones[Tone::Unpushed as usize]
     }
     pub fn worst(&self) -> Tone {
         Tone::ALL
@@ -61,11 +86,13 @@ pub struct App {
     pub cwd: PathBuf,
     pub table: TableState,
     pub only_drift: bool,
+    pub only_unuploaded: bool,
     pub sort: Sort,
     pub marks: BTreeSet<PathBuf>,
     pub busy: HashSet<PathBuf>,
     pub search: Option<String>,
     pub confirm: Option<(Op, Vec<PathBuf>)>,
+    pub modal: Option<Modal>,
     pub batch: Option<crate::events::Batch>,
     pub help: bool,
     pub chat: crate::chat::Chat,
@@ -150,6 +177,9 @@ impl App {
         let mut out = self.search.as_deref().map_or_else(|| self.tree(), |q| self.matches(q));
         if self.only_drift {
             out.retain(|e| e.attention() + e.tones[Tone::Pending as usize] > 0);
+        }
+        if self.only_unuploaded {
+            out.retain(|e| e.unuploaded() > 0);
         }
         // Stable sorts: ties keep path order.
         match (&self.search, self.sort) {

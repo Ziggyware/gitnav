@@ -30,8 +30,10 @@ const READ: &[&str] = &[
     "merge-base",
     "cherry",
     "whatchanged",
+    "symbolic-ref",
 ];
 const WRITE: &[&str] = &[
+    "init",
     "fetch",
     "pull",
     "push",
@@ -143,6 +145,7 @@ mod tests {
         assert_eq!(c("log --oneline -5"), Ok(Risk::Read));
         assert_eq!(c("branch -vv"), Ok(Risk::Read));
         assert_eq!(c("remote -v"), Ok(Risk::Read));
+        assert_eq!(c("init -b main"), Ok(Risk::Write));
         assert_eq!(c("branch feature"), Ok(Risk::Write));
         assert_eq!(c("switch -c topic"), Ok(Risk::Write));
         assert_eq!(c("pull --ff-only"), Ok(Risk::Write));

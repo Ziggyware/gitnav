@@ -9,14 +9,15 @@ pub fn help(f: &mut Frame, area: Rect) {
     let rows = [
         ("enter → l", "open folder · cd into repo"),
         ("← h bksp", "up a level"),
-        ("c", "cd into selection"),
+        ("c / C", "stage & commit modal · cd into selection"),
+        ("b", "branch deck: switch, create, delete, unify master→main"),
+        ("G", "publish & graft to GitHub (unborn folders or local repos)"),
+        ("N", "scaffold new project folder (rs:app, ts:app, py:app)"),
+        ("u · d · s", "filter unuploaded apps · drift only · cycle sort"),
         ("space a esc", "mark · mark drifted · clear"),
-        ("f p P", "fetch · pull --ff-only · push"),
-        ("r", "re-check statuses here"),
-        ("/", "fuzzy-find any repo"),
+        ("f p P", "fetch · smart-pull (stash+graft) · smart-push"),
+        ("r /", "re-check statuses · fuzzy-find any project"),
         ("i tab", "ask the AI · it can run git (changes need your y)"),
-        ("s · d", "sort · drift only"),
-        ("g G", "top · bottom"),
     ];
     let mut lines: Vec<Line> = rows
         .iter()
@@ -30,10 +31,14 @@ pub fn help(f: &mut Frame, area: Rect) {
             .collect::<Vec<_>>(),
     ));
     lines.push(Line::from(
-        "  actions hit marked repos, else the selection's subtree".fg(DIM),
+        "  ◊ Unborn = local project without .git · ⌂ Unpushed = never uploaded to GitHub".fg(DIM),
     ));
     lines.push(Line::default());
     let how = [
+        (
+            "graft (G)",
+            "initializes .git, commits code, creates/binds GitHub repo & grafts disjoint histories",
+        ),
         (
             "pace",
             "commits/wk, weighted so each week counts half as much 4 weeks later",
@@ -50,18 +55,12 @@ pub fn help(f: &mut Frame, area: Rect) {
             "cadence",
             "B = (sd - mean)/(sd + mean) of gaps: -1 regular, 0 random, 1 sprints",
         ),
-        (
-            "rhythm",
-            "circular mean of commit times; R = 1 same minute daily, 0 uniform",
-        ),
-        ("focus", "fewest repos holding 80% of a folder's commits"),
-        ("grid", "weeks across, Mon-Sun down; shade = quartile of active days"),
     ];
     lines.extend(
         how.iter()
             .map(|&(k, d)| Line::from(vec![format!("{k:>12}  ").fg(ACCENT), d.fg(DIM)])),
     );
-    let pop = area.centered(Length(90.min(area.width)), Length(lines.len() as u16 + 2));
+    let pop = area.centered(Length(94.min(area.width)), Length(lines.len() as u16 + 2));
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::new().fg(ACCENT))

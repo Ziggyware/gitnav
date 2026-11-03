@@ -1,12 +1,12 @@
 //! Background results in, user intents out.
 use crate::{
-    app::App,
+    app::{App, Modal},
     porcelain::Tone,
     scan::{self, Msg, Op},
 };
-use std::{path::PathBuf, sync::mpsc::Sender, thread};
+use std::{fs, path::PathBuf, process::Command, sync::mpsc::Sender, thread};
 
-/// Progress of one fetch/pull/push across its targets.
+/// Progress of one fetch/pull/push/commit/branch/adopt across its targets.
 pub struct Batch {
     pub op: Op,
     pub total: usize,
@@ -22,7 +22,21 @@ impl App {
                 self.repos.entry(rel.clone()).or_insert(None);
                 self.seen.insert(rel);
             }
-            Msg::Status(rel, s) => _ = self.repos.insert(rel, Some(s)),
+            Msg::Status(rel, s) => {
+                if let Some(Modal::Branches {
+                    rel: m_rel,
+                    items,
+                    sel,
+                    ..
+                }) = &mut self.modal
+                {
+                    if *m_rel == rel {
+                        *items = s.branches.clone();
+                        *sel = (*sel).min(items.len().saturating_sub(1));
+                    }
+                }
+                self.repos.insert(rel, Some(s));
+            }
             Msg::Pulse(rel, p) => {
                 self.pulses.insert(rel, p);
                 self.rerank();
@@ -56,7 +70,6 @@ impl App {
             return;
         };
         self.infos.insert(e.rel.clone(), None);
-        // "XY path" or "XY new <- old": the file on disk is the first path.
         let changes = self.repos[&e.rel].as_ref().map_or(&[][..], |s| &s.changes[..]);
         let paths: Vec<String> = changes
             .iter()
@@ -67,7 +80,7 @@ impl App {
     }
 
     /// Marked repos, else everything under the selection.
-    fn targets(&self) -> Vec<PathBuf> {
+    pub fn targets(&self) -> Vec<PathBuf> {
         if !self.marks.is_empty() {
             return self.marks.iter().cloned().collect();
         }
@@ -98,7 +111,7 @@ impl App {
         }
         if op != Op::Status {
             self.batch = Some(Batch {
-                op,
+                op: op.clone(),
                 total: rels.len(),
                 ok: 0,
                 failed: 0,
@@ -106,6 +119,110 @@ impl App {
             });
         }
         scan::spawn_ops(self.root.clone(), rels, op, tx.clone());
+    }
+
+    pub fn open_commit_modal(&mut self) {
+        let targets = self.targets();
+        if !targets.is_empty() {
+            self.modal = Some(Modal::Commit {
+                targets,
+                msg: String::new(),
+            });
+        }
+    }
+
+    pub fn open_adopt_modal(&mut self) {
+        let targets = self.targets();
+        if !targets.is_empty() {
+            let default_spec = if targets.len() == 1 {
+                targets[0]
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+            self.modal = Some(Modal::Adopt {
+                targets,
+                spec: default_spec,
+            });
+        }
+    }
+
+    pub fn open_branch_modal(&mut self) {
+        let Some(e) = self.selected() else { return };
+        let rel = if e.repo {
+            e.rel
+        } else {
+            let Some(first) = self.under(&e.rel).next().cloned() else {
+                return;
+            };
+            first
+        };
+        let dir = self.abs(&rel);
+        let items = crate::git::list_branches(&dir);
+        let sel = items.iter().position(|b| b.head).unwrap_or(0);
+        self.modal = Some(Modal::Branches {
+            rel,
+            items,
+            sel,
+            creating: None,
+        });
+    }
+
+    pub fn open_new_project_modal(&mut self) {
+        self.modal = Some(Modal::NewProject {
+            cwd: self.cwd.clone(),
+            spec: String::new(),
+        });
+    }
+
+    /// Scaffolds a new project folder (`name`, `rs:name`, `ts:name`, `py:name`), initializes git, and registers it.
+    pub fn scaffold_project(&mut self, cwd: PathBuf, spec: String, tx: &Sender<Msg>) {
+        let spec = spec.trim();
+        if spec.is_empty() {
+            return;
+        }
+        let (kind, name) = spec
+            .split_once(':')
+            .map_or(("rs", spec), |(k, n)| (k.trim(), n.trim()));
+        if name.is_empty() {
+            return;
+        }
+        let rel = if cwd.as_os_str().is_empty() {
+            PathBuf::from(name)
+        } else {
+            cwd.join(name)
+        };
+        let abs = self.abs(&rel);
+        let _ = fs::create_dir_all(&abs);
+        match kind {
+            "rs" | "rust" => {
+                if !abs.join("Cargo.toml").exists() {
+                    let _ = Command::new("cargo").arg("init").arg(&abs).output();
+                }
+            }
+            "ts" | "deno" => {
+                let _ = fs::write(
+                    abs.join("deno.json"),
+                    "{\n  \"tasks\": {\n    \"dev\": \"deno run --watch main.ts\"\n  }\n}\n",
+                );
+                let _ = fs::write(abs.join("main.ts"), "console.log(\"ready\");\n");
+            }
+            "py" | "python" => {
+                let _ = fs::write(
+                    abs.join("pyproject.toml"),
+                    format!("[project]\nname = \"{name}\"\nversion = \"0.1.0\"\n"),
+                );
+                let _ = fs::write(abs.join("main.py"), "if __name__ == \"__main__\":\n    pass\n");
+            }
+            _ => {
+                let _ = fs::create_dir_all(abs.join("src"));
+                let _ = fs::write(abs.join("README.md"), format!("# {name}\n"));
+            }
+        }
+        self.repos.entry(rel.clone()).or_insert(None);
+        self.launch(Op::Commit("feat: scaffold project".into()), vec![rel], tx);
     }
 
     /// Folder rows toggle their whole subtree.

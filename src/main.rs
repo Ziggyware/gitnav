@@ -8,6 +8,7 @@ mod events;
 mod exec;
 mod fuzzy;
 mod git;
+mod github;
 mod history;
 #[cfg(test)]
 mod history_test;
@@ -32,6 +33,7 @@ mod ui_folder;
 mod ui_heat;
 mod ui_help;
 mod ui_list;
+mod ui_modal;
 mod ui_mosaic;
 mod ui_people;
 mod ui_row;

@@ -5,6 +5,7 @@ use crate::{
     theme::{self, *},
     ui_bar::batch_line,
     ui_help::help,
+    ui_modal::render_modal,
     ui_mosaic::tile,
 };
 use ratatui::{layout::Constraint::*, prelude::*};
@@ -39,27 +40,43 @@ impl App {
             f.render_widget(batch_line(b), log);
         }
         f.render_widget(self.footer(), foot);
+        if let Some(m) = &self.modal {
+            render_modal(f, area, m);
+        }
         if self.help {
             help(f, area);
         }
     }
 
     fn header(&self) -> Line<'static> {
-        let mut counts = [0usize; 7];
+        let mut counts = [0usize; 8];
         self.repos.values().for_each(|s| counts[tone(s.as_ref()) as usize] += 1);
         let path = format!("  {}  ", self.abs(&self.cwd).display());
         let mut l = vec![" » gitnav ".fg(BG).bg(ACCENT).bold(), path.fg(TEXT)];
         for t in Tone::ALL.into_iter().filter(|&t| counts[t as usize] > 0) {
             l.push(format!(" {}{}", glyph(t), counts[t as usize]).fg(theme::tone(t)));
         }
+        let unuploaded = counts[Tone::Unborn as usize] + counts[Tone::Unpushed as usize];
+        if unuploaded > 0 {
+            l.push(format!("  ◊{unuploaded} unuploaded").fg(theme::tone(Tone::Unborn)).bold());
+        }
         if self.scanning || counts[Tone::Pending as usize] > 0 || !self.busy.is_empty() {
-            l.push(format!("  {}", spin(self.tick)).fg(theme::tone(Tone::ALL[self.tick as usize % 6])));
+            l.push(format!("  {}", spin(self.tick)).fg(theme::tone(Tone::ALL[self.tick as usize % 7])));
         }
         if !self.marks.is_empty() {
             l.push(format!("  ▌{} marked", self.marks.len()).fg(ACCENT).bold());
         }
         let sort = ["", "  ↕ attention", "  ↕ recent"][self.sort as usize];
-        l.extend([sort.fg(DIM), if self.only_drift { "  only drift" } else { "" }.fg(DIM)]);
+        l.extend([
+            sort.fg(DIM),
+            if self.only_drift { "  only drift" } else { "" }.fg(DIM),
+            if self.only_unuploaded {
+                "  only unuploaded"
+            } else {
+                ""
+            }
+            .fg(theme::tone(Tone::Unborn)),
+        ]);
         Line::from(l)
     }
 }

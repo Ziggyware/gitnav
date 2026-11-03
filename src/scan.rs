@@ -1,5 +1,5 @@
 use crate::{
-    git::{git, status},
+    git::{self, git, status},
     history::{Info, Pulse},
     porcelain::Status,
 };
@@ -11,25 +11,32 @@ use std::{
     thread,
 };
 
-/// Only non-destructive operations: no force, no reset, fast-forward pulls only.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// Operations dispatched across single or marked repositories.
+#[derive(Clone, Debug, PartialEq)]
 pub enum Op {
     Status,
     Fetch,
     Pull,
     Push,
+    Commit(String),
+    BranchSwitch(String),
+    BranchDelete(String),
+    UnifyMain,
+    Adopt(String),
 }
 
 impl Op {
-    pub fn verb(self) -> &'static str {
-        ["refresh", "fetch", "pull", "push"][self as usize]
-    }
-    fn args(self) -> &'static [&'static str] {
+    pub fn verb(&self) -> &'static str {
         match self {
-            Op::Status => &[],
-            Op::Fetch => &["fetch", "--quiet", "--prune"],
-            Op::Pull => &["pull", "--ff-only", "--quiet"],
-            Op::Push => &["push", "--quiet"],
+            Op::Status => "refresh",
+            Op::Fetch => "fetch",
+            Op::Pull => "smart-pull",
+            Op::Push => "smart-push",
+            Op::Commit(_) => "commit",
+            Op::BranchSwitch(_) => "branch",
+            Op::BranchDelete(_) => "del-branch",
+            Op::UnifyMain => "unify-main",
+            Op::Adopt(_) => "publish-github",
         }
     }
 }
@@ -68,23 +75,73 @@ fn push(tiers: &mut [VecDeque<Task>; 3], t: Task) {
     tiers[t.tier()].push_back(t);
 }
 
-const SKIP: &[&str] = &["node_modules", "target"];
+const SKIP: &[&str] = &[
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    "out",
+    "vendor",
+    "__pycache__",
+    "venv",
+];
 
-/// One readdir per folder: `.git` among the entries marks a repo, so no extra stat.
-fn list(dir: &Path) -> (bool, Vec<PathBuf>) {
+const MANIFESTS: &[&str] = &[
+    "Cargo.toml",
+    "package.json",
+    "deno.json",
+    "deno.jsonc",
+    "pyproject.toml",
+    "go.mod",
+    "Makefile",
+    "CMakeLists.txt",
+    "build.zig",
+    "pom.xml",
+    "flake.nix",
+];
+
+const CODE_EXTS: &[&str] = &[
+    "rs", "ts", "tsx", "js", "py", "go", "c", "cpp", "h", "cs", "zig", "lua", "sh", "ps1", "html",
+];
+
+/// One readdir per folder: `.git` marks a tracked repo; project manifests or leaf source files mark an Unborn app.
+fn list(dir: &Path, is_root: bool) -> (bool, Vec<PathBuf>) {
     let mut kids = Vec::new();
     let Ok(rd) = fs::read_dir(dir) else {
         return (false, kids);
     };
+    let mut has_manifest = false;
+    let mut code_files = 0usize;
+    let mut has_src_dir = false;
+
     for e in rd.flatten() {
         let name = e.file_name();
         let n = name.to_string_lossy();
         if n == ".git" {
             return (true, Vec::new());
         }
-        if !n.starts_with('.') && !SKIP.contains(&&*n) && e.file_type().is_ok_and(|t| t.is_dir()) {
-            kids.push(e.path());
+        let Ok(ft) = e.file_type() else { continue };
+        if ft.is_dir() {
+            if n == "src" {
+                has_src_dir = true;
+            }
+            if !n.starts_with('.') && !SKIP.contains(&&*n) {
+                kids.push(e.path());
+            }
+        } else if ft.is_file() {
+            if MANIFESTS.contains(&&*n) || n.ends_with(".sln") || n.ends_with(".csproj") {
+                has_manifest = true;
+            }
+            if let Some((_, ext)) = n.rsplit_once('.') {
+                if CODE_EXTS.contains(&ext) {
+                    code_files += 1;
+                }
+            }
         }
+    }
+
+    if !is_root && (has_manifest || has_src_dir || (kids.is_empty() && code_files >= 2)) {
+        return (true, Vec::new());
     }
     (false, kids)
 }
@@ -103,28 +160,52 @@ fn next(q: &Queue, cv: &Condvar) -> Option<Task> {
     }
 }
 
+fn execute_op(dir: &Path, op: &Op) -> Result<(), String> {
+    match op {
+        Op::Status => Ok(()),
+        Op::Fetch => git(dir, &["fetch", "--quiet", "--prune"]).map(drop),
+        Op::Pull => git::smart_pull(dir),
+        Op::Push => git::smart_push(dir),
+        Op::Commit(msg) => git::stage_and_commit(dir, msg),
+        Op::BranchSwitch(br) => git::switch_or_create_branch(dir, br),
+        Op::BranchDelete(br) => git::delete_branch(dir, br),
+        Op::UnifyMain => git::unify_main_master(dir),
+        Op::Adopt(spec) => git::adopt_and_publish(dir, spec),
+    }
+}
+
 fn run(root: &Path, task: Task, q: &Queue, tx: &Sender<Msg>) {
     let send = |m| _ = tx.send(m);
     match task {
         Task::Status(rel, op) => {
-            let dir = root.join(&rel);
+            let dir = if rel.as_os_str().is_empty() {
+                root.to_path_buf()
+            } else {
+                root.join(&rel)
+            };
+            let refresh_pulse = !matches!(op, Op::Status | Op::Fetch);
             if op != Op::Status {
-                send(Msg::Acted(rel.clone(), git(&dir, op.args()).map(drop)));
+                send(Msg::Acted(rel.clone(), execute_op(&dir, &op)));
             }
             send(Msg::Status(rel.clone(), status(&dir)));
-            if op == Op::Pull {
+            if refresh_pulse {
                 push(&mut q.lock().unwrap().0, Task::Pulse(rel));
             }
         }
         Task::Pulse(rel) => {
-            let p = crate::git::pulse(&root.join(&rel));
+            let dir = if rel.as_os_str().is_empty() {
+                root.to_path_buf()
+            } else {
+                root.join(&rel)
+            };
+            let p = crate::git::pulse(&dir);
             send(Msg::Pulse(rel, p));
         }
         Task::Walk(dir) => {
-            let (repo, kids) = list(&dir);
+            let (repo, kids) = list(&dir, dir == root);
             let mut g = q.lock().unwrap();
             if repo {
-                let rel = dir.strip_prefix(root).unwrap().to_path_buf();
+                let rel = dir.strip_prefix(root).unwrap_or(Path::new("")).to_path_buf();
                 send(Msg::Repo(rel.clone()));
                 push(&mut g.0, Task::Status(rel.clone(), Op::Status));
                 push(&mut g.0, Task::Pulse(rel));
@@ -161,7 +242,7 @@ pub fn spawn_scan(root: PathBuf, tx: Sender<Msg>) {
 }
 
 pub fn spawn_ops(root: PathBuf, rels: Vec<PathBuf>, op: Op, tx: Sender<Msg>) {
-    let tasks = rels.into_iter().map(|r| Task::Status(r, op)).collect();
-    // Network ops idle on I/O: oversubscribe hard.
-    thread::spawn(move || pool(&root, tasks, if op == Op::Status { 2 } else { 8 }, &tx));
+    let oversub = if op == Op::Status { 2 } else { 8 };
+    let tasks = rels.into_iter().map(|r| Task::Status(r, op.clone())).collect();
+    thread::spawn(move || pool(&root, tasks, oversub, &tx));
 }

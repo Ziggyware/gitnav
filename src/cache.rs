@@ -15,7 +15,7 @@ pub type Repos = BTreeMap<PathBuf, Option<Status>>;
 pub type Pulses = HashMap<PathBuf, Pulse>;
 
 /// Bumped whenever the shape changes; older files are ignored, not misread.
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 
 #[derive(Serialize, Deserialize)]
 struct Snapshot {
@@ -115,7 +115,7 @@ mod tests {
             (1, true, 3, "main")
         );
         assert_eq!(bp[Path::new("w/api")], u);
-        let bad = br#"{"version":2,"repos":[],"pulses":[["x",{"last":0,"today":0,"days":[1],"hours":[],"circ":[0,0],"burst":null,"churn":[],"others":[],"late":[],"authors":[],"hot":[],"recent":[]}]]}"#;
+        let bad = br#"{"version":3,"repos":[],"pulses":[["x",{"last":0,"today":0,"days":[1],"hours":[],"circ":[0,0],"burst":null,"churn":[],"others":[],"late":[],"authors":[],"hot":[],"recent":[]}]]}"#;
         assert!(decode(bad).1.is_empty());
         assert!(decode(b"not json").0.is_empty());
     }

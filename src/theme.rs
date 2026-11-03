@@ -19,6 +19,7 @@ pub fn tone(t: Tone) -> Color {
         Tone::Dirty => (255, 203, 107),
         Tone::Ahead => (137, 221, 255),
         Tone::Unpushed => (247, 140, 108),
+        Tone::Unborn => (0, 230, 195),
         Tone::Clean => (195, 232, 141),
         Tone::Pending => (108, 115, 150),
     };
@@ -27,7 +28,7 @@ pub fn tone(t: Tone) -> Color {
 
 pub fn glyph(t: Tone) -> &'static str {
     // Native to common monospace faces and centred on the digit line: no fallback-font drift.
-    ["×", "↓", "±", "↑", "⌂", "=", "·"][t as usize]
+    ["×", "↓", "±", "↑", "⌂", "◊", "=", "·"][t as usize]
 }
 
 pub fn spin(tick: u64) -> String {
@@ -61,7 +62,7 @@ pub fn heat(now: i64, t: i64) -> Color {
 }
 
 /// Proportional stacked bar; every non-empty tone keeps at least one cell.
-pub fn bar(counts: &[usize; 7], width: usize) -> Vec<Span<'static>> {
+pub fn bar(counts: &[usize; 8], width: usize) -> Vec<Span<'static>> {
     let total = counts.iter().sum::<usize>();
     if total == 0 {
         return vec!["━".repeat(width).fg(COLD)];
@@ -70,7 +71,7 @@ pub fn bar(counts: &[usize; 7], width: usize) -> Vec<Span<'static>> {
         .iter()
         .map(|&c| if c == 0 { 0 } else { (c * width / total).max(1) })
         .collect();
-    let biggest = |v: &[usize]| (0..7).max_by_key(|&i| v[i]).unwrap();
+    let biggest = |v: &[usize]| (0..8).max_by_key(|&i| v[i]).unwrap();
     while cells.iter().sum::<usize>() > width {
         let i = biggest(&cells);
         cells[i] -= 1;
@@ -99,14 +100,14 @@ mod tests {
 
     #[test]
     fn bar_and_age() {
-        let w = |c: [usize; 7]| {
+        let w = |c: [usize; 8]| {
             bar(&c, 10)
                 .iter()
                 .map(|s| s.content.chars().count())
                 .collect::<Vec<_>>()
         };
-        assert_eq!(w([1, 0, 0, 0, 0, 299, 0]), [1, 9]);
-        assert_eq!(w([0, 0, 5, 0, 0, 5, 0]), [5, 5]);
+        assert_eq!(w([1, 0, 0, 0, 0, 0, 299, 0]), [1, 9]);
+        assert_eq!(w([0, 0, 5, 0, 0, 0, 5, 0]), [5, 5]);
         assert_eq!(
             (age(100_000, 100_000 - 90), age(10_000_000, 1)),
             ("1m".into(), "16w".into())

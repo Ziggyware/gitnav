@@ -1,4 +1,14 @@
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct BranchRef {
+    pub name: String,
+    pub upstream: Option<String>,
+    pub ahead: u32,
+    pub behind: u32,
+    pub head: bool,
+    pub remote_only: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Status {
     pub branch: String,
     pub upstream: Option<String>,
@@ -6,6 +16,12 @@ pub struct Status {
     pub behind: u32,
     pub changes: Vec<String>,
     pub error: Option<String>,
+    #[serde(default)]
+    pub unborn: bool,
+    #[serde(default)]
+    pub has_remote: bool,
+    #[serde(default)]
+    pub branches: Vec<BranchRef>,
     /// Loaded from cache or awaiting a re-check.
     #[serde(skip)]
     pub stale: bool,
@@ -19,17 +35,19 @@ pub enum Tone {
     Dirty,
     Ahead,
     Unpushed,
+    Unborn,
     Clean,
     Pending,
 }
 
 impl Tone {
-    pub const ALL: [Tone; 7] = [
+    pub const ALL: [Tone; 8] = [
         Tone::Error,
         Tone::Behind,
         Tone::Dirty,
         Tone::Ahead,
         Tone::Unpushed,
+        Tone::Unborn,
         Tone::Clean,
         Tone::Pending,
     ];
@@ -43,13 +61,17 @@ impl Status {
     pub fn dirty(&self) -> bool {
         !self.changes.is_empty()
     }
+    pub fn never_uploaded(&self) -> bool {
+        self.unborn || !self.has_remote || self.upstream.is_none()
+    }
     pub fn tone(&self) -> Tone {
         match () {
             _ if self.error.is_some() => Tone::Error,
+            _ if self.unborn => Tone::Unborn,
             _ if self.behind > 0 => Tone::Behind,
             _ if self.dirty() => Tone::Dirty,
             _ if self.ahead > 0 => Tone::Ahead,
-            _ if self.upstream.is_none() => Tone::Unpushed,
+            _ if !self.has_remote || self.upstream.is_none() => Tone::Unpushed,
             _ => Tone::Clean,
         }
     }
@@ -93,13 +115,14 @@ mod tests {
 
     #[test]
     fn parses_porcelain_v2() {
-        let s = parse(
+        let mut s = parse(
             "# branch.oid abc\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +2 -1\n\
              1 .M N... 100644 100644 100644 a b src/my file.rs\n\
              2 R. N... 100644 100644 100644 a b R100 new.rs\told.rs\n\
              u UU N... 100644 100644 100644 100644 a b c conflict.rs\n\
              ? notes.txt\n",
         );
+        s.has_remote = true;
         assert_eq!(
             (s.branch.as_str(), s.upstream.as_deref()),
             ("main", Some("origin/main"))

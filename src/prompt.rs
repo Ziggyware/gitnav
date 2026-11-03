@@ -2,13 +2,15 @@
 use crate::{app::App, theme};
 use std::fmt::Write;
 
-const PROTOCOL: &str = r#"You are the assistant inside gitnav, a terminal dashboard over every git repo under one root.
+const PROTOCOL: &str = r#"You are the assistant inside gitnav, a terminal dashboard over every git repo and local project under one root.
 Answer questions about the repos and carry out git work on them.
 To run git, write a block (any number per reply):
 <git repo="REPO">ARGS</git>
 - REPO is a path from the snapshot below ("." is the root itself).
 - ARGS are git arguments without the word git, split like a shell; no pipes, globs or other programs.
 - Inspecting commands run at once. Anything that changes a repo or a remote is shown to the user, who approves or denies it.
+- Unborn projects (no .git yet) can be initialized with <git repo="REPO">init -b main</git>.
+- Disjoint histories between local folders and newly created GitHub repos can be unified with `merge origin/main --allow-unrelated-histories -s ours`.
 - Never force-push, reset --hard, clean or delete branches unless the user explicitly asked for that.
 - Results come back in <result> blocks. Keep going until you can answer.
 - Final answers: concise plain text, no <git> blocks. Cite repo paths. Say what you changed.
@@ -33,7 +35,7 @@ impl App {
                     "{name} | {:?} | {} -> {} | +{}/-{} | {} files | {last} ago | {n}",
                     st.tone(),
                     st.branch,
-                    st.upstream.as_deref().unwrap_or("none"),
+                    st.upstream.as_deref().unwrap_or(if st.unborn { "unborn" } else { "none" }),
                     st.ahead,
                     st.behind,
                     st.changes.len()

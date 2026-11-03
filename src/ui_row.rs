@@ -38,6 +38,7 @@ impl App {
         let busy = self.busy.iter().any(|b| b.starts_with(&e.rel));
         let icon = match () {
             _ if busy || e.tones[Tone::Pending as usize] > 0 => spin(self.tick),
+            _ if e.repo && st.is_some_and(|s| s.unborn) => "◊".into(),
             _ if e.repo => "•".into(),
             _ => "›".into(),
         };
@@ -92,6 +93,10 @@ pub fn badges(s: &Status) -> Vec<Span<'static>> {
     if s.error.is_some() {
         v.push(" ×".fg(t(Tone::Error)));
     }
+    if s.unborn {
+        v.push(format!(" ◊unborn({})", s.changes.len()).fg(t(Tone::Unborn)));
+        return v;
+    }
     if s.dirty() {
         v.push(format!(" ±{}", s.changes.len()).fg(t(Tone::Dirty)));
     }
@@ -101,8 +106,14 @@ pub fn badges(s: &Status) -> Vec<Span<'static>> {
     if s.behind > 0 {
         v.push(format!(" ↓{}", s.behind).fg(t(Tone::Behind)));
     }
-    if s.upstream.is_none() {
+    if !s.has_remote {
+        v.push(" ⌂local".fg(t(Tone::Unpushed)));
+    } else if s.upstream.is_none() {
         v.push(" ⌂".fg(t(Tone::Unpushed)));
+    }
+    if s.branches.iter().filter(|b| !b.remote_only).count() > 1 {
+        let n = s.branches.iter().filter(|b| !b.remote_only).count();
+        v.push(format!(" ⎇{n}").fg(ACCENT));
     }
     if v.is_empty() {
         v.push(" =".fg(t(Tone::Clean)));

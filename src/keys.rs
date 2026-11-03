@@ -1,5 +1,5 @@
 use crate::{
-    app::App,
+    app::{App, Modal},
     nav::Sort,
     scan::{Msg, Op},
 };
@@ -36,6 +36,10 @@ impl App {
             }
             return None;
         }
+        if let Some(modal) = self.modal.take() {
+            self.handle_modal_key(modal, k, tx);
+            return None;
+        }
         if std::mem::take(&mut self.help) {
             return None;
         }
@@ -69,10 +73,18 @@ impl App {
             PageDown => self.step(10),
             PageUp => self.step(-10),
             Char('g') | Home => self.step(isize::MIN / 2),
-            Char('G') | End => self.step(isize::MAX / 2),
+            Char('G') if k.modifiers.contains(KeyModifiers::SHIFT) => self.open_adopt_modal(),
+            End => self.step(isize::MAX / 2),
             Enter | Right | Char('l') => return self.enter().map(Exit::Cd),
             Backspace | Left | Char('h') => self.up(),
-            Char('c') => return self.selected().map(|e| Exit::Cd(self.abs(&e.rel))),
+            Char('C') => return self.selected().map(|e| Exit::Cd(self.abs(&e.rel))),
+            Char('c') => self.open_commit_modal(),
+            Char('b') => self.open_branch_modal(),
+            Char('N') => self.open_new_project_modal(),
+            Char('u') => {
+                self.only_unuploaded ^= true;
+                self.table.select(Some(0));
+            }
             Char(' ') => {
                 self.toggle_mark();
                 self.step(1);
@@ -90,7 +102,10 @@ impl App {
                     .collect();
                 self.launch(Op::Status, rels, tx);
             }
-            Char('d') => self.only_drift ^= true,
+            Char('d') => {
+                self.only_drift ^= true;
+                self.table.select(Some(0));
+            }
             Char('s') => {
                 self.sort = match self.sort {
                     Sort::Name => Sort::Attention,
@@ -108,5 +123,114 @@ impl App {
             _ => {}
         }
         None
+    }
+
+    fn handle_modal_key(&mut self, mut modal: Modal, k: KeyEvent, tx: &Sender<Msg>) {
+        match &mut modal {
+            Modal::Commit { targets, msg } => match k.code {
+                Esc => return,
+                Enter => {
+                    let m = std::mem::take(msg);
+                    let t = std::mem::take(targets);
+                    self.launch(Op::Commit(m), t, tx);
+                    return;
+                }
+                Backspace => _ = msg.pop(),
+                Char(c) => msg.push(c),
+                _ => {}
+            },
+            Modal::Adopt { targets, spec } => match k.code {
+                Esc => return,
+                Enter => {
+                    let s = std::mem::take(spec);
+                    let t = std::mem::take(targets);
+                    self.launch(Op::Adopt(s), t, tx);
+                    return;
+                }
+                Backspace => _ = spec.pop(),
+                Char(c) => spec.push(c),
+                _ => {}
+            },
+            Modal::NewProject { cwd, spec } => match k.code {
+                Esc => return,
+                Enter => {
+                    let c = cwd.clone();
+                    let s = std::mem::take(spec);
+                    self.scaffold_project(c, s, tx);
+                    return;
+                }
+                Backspace => _ = spec.pop(),
+                Char(c) => spec.push(c),
+                _ => {}
+            },
+            Modal::Branches {
+                rel,
+                items,
+                sel,
+                creating,
+            } => {
+                if let Some(name) = creating {
+                    match k.code {
+                        Esc => *creating = None,
+                        Enter => {
+                            let br = std::mem::take(name);
+                            let r = rel.clone();
+                            if !br.trim().is_empty() {
+                                self.launch(Op::BranchSwitch(br), vec![r], tx);
+                            }
+                            return;
+                        }
+                        Backspace => _ = name.pop(),
+                        Char(c) => name.push(c),
+                        _ => {}
+                    }
+                } else {
+                    match k.code {
+                        Esc | Char('q') | Char('b') => return,
+                        Char('j') | Down => {
+                            if !items.is_empty() {
+                                *sel = (*sel + 1).min(items.len() - 1);
+                            }
+                        }
+                        Char('k') | Up => {
+                            *sel = sel.saturating_sub(1);
+                        }
+                        Char('n') => *creating = Some(String::new()),
+                        Enter => {
+                            if let Some(b) = items.get(*sel) {
+                                let name = b.name.clone();
+                                let r = rel.clone();
+                                self.launch(Op::BranchSwitch(name), vec![r], tx);
+                                return;
+                            }
+                        }
+                        Char('x') | Delete => {
+                            if let Some(b) = items.get(*sel) {
+                                if !b.head {
+                                    let name = b.name.clone();
+                                    let r = rel.clone();
+                                    self.launch(Op::BranchDelete(name), vec![r], tx);
+                                }
+                            }
+                        }
+                        Char('m') => {
+                            let r = rel.clone();
+                            self.launch(Op::UnifyMain, vec![r], tx);
+                            return;
+                        }
+                        Char('p') => {
+                            let r = rel.clone();
+                            self.launch(Op::Pull, vec![r], tx);
+                        }
+                        Char('P') => {
+                            let r = rel.clone();
+                            self.launch(Op::Push, vec![r], tx);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        self.modal = Some(modal);
     }
 }
